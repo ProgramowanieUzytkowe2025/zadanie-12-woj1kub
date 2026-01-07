@@ -1,34 +1,60 @@
 import './AppCalculator.css';
-import { useState } from 'react';
+import { useState, useEffect, useReducer } from 'react';
 import { AppButton } from './AppButton';
 import { AppCalculationHistory } from './AppCalculationHistory';
+import { useKalkulator } from './useKalkulator';
+import { kalkulatorReducer, initialStatus } from './kalkulatorReducer';
 
 export function AppCalculator() {
-    const [liczbaA, setLiczbaA] = useState(null);
-    const [liczbaB, setLiczbaB] = useState(null);
-    const [wynik, setWynik] = useState(null);
-    const [historia, setHistoria] = useState([]);
 
-    function dodaj() {
-        aktualizujHistorie('+', liczbaA + liczbaB);
-    }
-
-    function odejmij() {
-        aktualizujHistorie('-', liczbaA - liczbaB);
-    }
-
-    function pomnoz() {
-        aktualizujHistorie('*', liczbaA * liczbaB);
-    }
-
-    function podziel() {
-        if(liczbaB !== 0) {
-            aktualizujHistorie('/', liczbaA / liczbaB);
+    function historiaDostepna() {
+        try {
+            return typeof sessionStorage !== 'undefined';
+        } catch {
+            return false;
         }
     }
 
+    const [historia, setHistoria] = useState(() => {
+        try {
+            const raw = historiaDostepna() ? sessionStorage.getItem('kalkulator_historia') : null;
+            const parsed = raw ? JSON.parse(raw) : null;
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    });
+
+    const [liczbaA, setLiczbaA] = useState(() => {
+        try {
+            const raw = historiaDostepna() ? sessionStorage.getItem('kalkulator_historia') : null;
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (Array.isArray(parsed) && parsed.length) return parsed[parsed.length - 1].a;
+        } catch {
+            // ignoruj
+        }
+        return null;
+    });
+
+    const [liczbaB, setLiczbaB] = useState(() => {
+        try {
+            const raw = historiaDostepna() ? sessionStorage.getItem('kalkulator_historia') : null;
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (Array.isArray(parsed) && parsed.length) return parsed[parsed.length - 1].b;
+        } catch {
+            // ignoruj
+        }
+        return null;
+    });
+    const [wynik, setWynik] = useState(null);
+
+    const { dodaj, odejmij, pomnoz, podziel } = useKalkulator({ liczbaA, liczbaB, historia, setHistoria, setWynik });
+
+    const [ostatniaAkcja, dispatchOstatniaAkcja] = useReducer(kalkulatorReducer, initialStatus);
+
     function liczbaAOnChange(value) {
         setLiczbaA(parsujLiczbe(value));
+        dispatchOstatniaAkcja({ type: 'CHANGE_A' });
     }
 
     function parsujLiczbe(value) {
@@ -42,6 +68,7 @@ export function AppCalculator() {
 
     function liczbaBOnChange(value) {
         setLiczbaB(parsujLiczbe(value));
+        dispatchOstatniaAkcja({ type: 'CHANGE_B' });
     }
 
     function onAppCalculationHistoryClick(index) {
@@ -50,38 +77,53 @@ export function AppCalculator() {
         setLiczbaA(historia[index].a);
         setLiczbaB(historia[index].b);
         setWynik(historia[index].wynik);
+        dispatchOstatniaAkcja({ type: 'RESTORE' });
     }
 
-    function aktualizujHistorie(operation, wynik) {
-        const nowaHistoria = [...historia, { a: liczbaA, b: liczbaB, operation: operation, wynik: wynik }];
-        setHistoria(nowaHistoria);
-        setWynik(wynik);
-    }
 
-    let porownanie;
-    let zablokujPrzyciski = liczbaA == null || liczbaB == null;
-    let zablokujDzielenie = zablokujPrzyciski || liczbaB === 0;
-
-    if(zablokujPrzyciski) 
-    {
-        porownanie = '';
-    } 
-    else 
-    {
-        if(liczbaA === liczbaB) {
-            porownanie = 'Liczba A jest równa liczbie B.';
-        } else if(liczbaA > liczbaB) {
-            porownanie = 'Liczba A jest większa od liczby B.';
-        } else {
-            porownanie = 'Liczba B jest większa od liczby A.';
+    useEffect(() => {
+        try {
+            if (historiaDostepna()) sessionStorage.setItem('kalkulator_historia', JSON.stringify(historia));
+        } catch {
+            // ignorowanie błędów zapisu do sessionStorage
         }
-    }
+    }, [historia]);
+
+    const zablokujPrzyciski = liczbaA == null || liczbaB == null;
+    const zablokujDzielenie = zablokujPrzyciski || liczbaB === 0;
+    const [porownanie, setPorownanie] = useState('');
+
+
+    useEffect(() => {
+        let nowePorownanie = '';
+
+        if (!zablokujPrzyciski) {
+            if (liczbaA === liczbaB) {
+                nowePorownanie = 'Liczba A jest równa liczbie B.';
+            } else if (liczbaA > liczbaB) {
+                nowePorownanie = 'Liczba A jest większa od liczby B.';
+            } else {
+                nowePorownanie = 'Liczba B jest większa od liczby A.';
+            }
+        }
+
+        if (nowePorownanie !== porownanie) {
+            setPorownanie(nowePorownanie);
+        }
+    }, [liczbaA, liczbaB, zablokujPrzyciski, porownanie]);
 
     return (
     <div className='app-calculator'>
         <div className='app-calculator-pole'>
             <label>Wynik: </label>
             <span>{wynik}</span>
+        </div>
+
+        <hr />
+
+        <div className='app-calculator-pole'>
+            <label>Ostatnia czynność: </label>
+            <input type="text" value={ostatniaAkcja} readOnly />
         </div>
 
         <hr />
@@ -105,10 +147,10 @@ export function AppCalculator() {
         <hr />
 
         <div className='app-calculator-przyciski'>
-            <AppButton disabled={zablokujPrzyciski} title="+" onClick={() => dodaj()}/>
-            <AppButton disabled={zablokujPrzyciski} title="-" onClick={() => odejmij()}/>
-            <AppButton disabled={zablokujPrzyciski} title="*" onClick={() => pomnoz()}/>
-            <AppButton disabled={zablokujDzielenie} title="/" onClick={() => podziel()}/>
+            <AppButton disabled={zablokujPrzyciski} title="+" onClick={() => { dodaj(); dispatchOstatniaAkcja({ type: 'CALC' }); }} />
+            <AppButton disabled={zablokujPrzyciski} title="-" onClick={() => { odejmij(); dispatchOstatniaAkcja({ type: 'CALC' }); }} />
+            <AppButton disabled={zablokujPrzyciski} title="*" onClick={() => { pomnoz(); dispatchOstatniaAkcja({ type: 'CALC' }); }} />
+            <AppButton disabled={zablokujDzielenie} title="/" onClick={() => { podziel(); dispatchOstatniaAkcja({ type: 'CALC' }); }} />
         </div>
 
         <hr />
